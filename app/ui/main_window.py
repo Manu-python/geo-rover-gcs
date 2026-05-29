@@ -71,13 +71,16 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Geo Ground Control Station")
         self.resize(920, 720)
         self._build_ui()
+        self._apply_dark_theme()
         self._set_status("Ready")
         self.log_message("Geo Ground Control Station started")
 
     def _build_ui(self) -> None:
         root = QWidget()
+        root.setObjectName("appRoot")
         root_layout = QVBoxLayout(root)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(18, 18, 18, 18)
+        root_layout.setSpacing(14)
 
         root_layout.addWidget(self._build_connection_section())
         root_layout.addWidget(self._build_manual_section())
@@ -85,6 +88,90 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self._build_log_section(), stretch=1)
 
         self.setCentralWidget(root)
+
+    def _apply_dark_theme(self) -> None:
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background: #121212;
+                color: #e8edf2;
+            }
+
+            QWidget#appRoot {
+                background: #121212;
+                color: #e8edf2;
+                font-size: 13px;
+            }
+
+            QGroupBox {
+                background: #1a1a1a;
+                border: 1px solid #2a2a2a;
+                border-radius: 10px;
+                color: #f3f6f9;
+                font-weight: 600;
+                margin-top: 12px;
+                padding: 16px 12px 12px 12px;
+            }
+
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 12px;
+                padding: 0 6px;
+                color: #b9b9b9;
+            }
+
+            QLabel {
+                color: #dddddd;
+            }
+
+            QPushButton {
+                background: #1E293B;
+                border-radius: 8px;
+                color: #E5E7EB;
+                font-weight: 600;
+                min-height: 34px;
+                padding: 7px 14px;
+            }
+
+            QPushButton:hover {
+                background: #273449;
+            }
+
+            QPushButton:pressed {
+                background: #334155;
+            }
+
+            QPushButton:disabled {
+                background: #242424;
+                color: #E5E7EB;
+            }
+
+            QLineEdit,
+            QTextEdit {
+                background: #181818;
+                border: 1px solid #303030;
+                border-radius: 8px;
+                color: #f0f0f0;
+                padding: 9px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
+
+            QLineEdit:focus,
+            QTextEdit:focus {
+                border-color: #60a5fa;
+            }
+
+            QLineEdit::placeholder {
+                color: #6f7f91;
+            }
+
+            QTextEdit {
+                font-family: Consolas, "Courier New", monospace;
+            }
+            """
+        )
 
     def _build_connection_section(self) -> QGroupBox:
         esp32_config = self.config.get("esp32", {})
