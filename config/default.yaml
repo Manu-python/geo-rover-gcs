@@ -1,0 +1,26 @@
+app:
+  name: Geo Ground Control Station
+  version: 0.3.0-mvp3
+
+esp32:
+  host: 192.168.4.1
+  port: 4210
+  timeout_s: 2.0
+
+ollama:
+  base_url: http://localhost:11434
+  model: llama3.2
+  timeout_s: 20
+
+logging:
+  level: INFO
+  log_to_file: true
+  log_dir: logs
+
+safety:
+  allowed_commands:
+    - PING
+    - STATUS
+    - LED_ON
+    - LED_OFF
+    - LED_TOGGLE
