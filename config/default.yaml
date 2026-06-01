@@ -1,11 +1,38 @@
 app:
   name: Geo Ground Control Station
-  version: 0.3.0-mvp3
+  version: 0.10.0-mvp10
 
 esp32:
   host: 192.168.4.1
   port: 4210
   timeout_s: 2.0
+
+telemetry:
+  listen_host: 0.0.0.0
+  listen_port: 4210
+  expected_prefix: TEL
+  stale_timeout_s: 2.0
+
+movement:
+  allowed_sequence_commands:
+    - LEFT
+    - RIGHT
+    - BACK
+    - CW
+    - CCW
+    - SAFE_FWD
+    - STOP
+  max_steps: 5
+  default_duration_ms: 700
+  min_duration_ms: 300
+  max_duration_ms: 1500
+  feedback_adjustment_ms: 200
+  inter_step_delay_ms: 150
+
+experience:
+  path: data/experiences.jsonl
+  min_similarity_score: 0.6
+  auto_execute: false
 
 ollama:
   base_url: http://localhost:11434
@@ -21,6 +48,17 @@ safety:
   allowed_commands:
     - PING
     - STATUS
+    - DIST
     - LED_ON
     - LED_OFF
     - LED_TOGGLE
+    - SAFE_FWD
+    - FWD
+    - BACK
+    - LEFT
+    - RIGHT
+    - CW
+    - CCW
+    - STOP
+    - STREAM_ON
+    - STREAM_OFF
