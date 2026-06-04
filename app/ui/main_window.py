@@ -27,8 +27,10 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -37,7 +39,7 @@ from PyQt5.QtWidgets import (
 from app.comms.esp32_udp_client import ESP32UdpClient
 from app.comms.sequence_executor import SequenceExecutor
 from app.comms.telemetry_receiver import TelemetryReceiver
-from app.core.command_schema import get_mvp3_allowed_commands, get_mvp9_manual_commands
+from app.core.command_schema import get_mvp9_manual_commands
 from app.core.experience import ExperienceRecord, ExperienceSituation
 from app.core.experience_store import ExperienceStore
 from app.core.movement_sequence import MovementSequence
@@ -48,10 +50,8 @@ from app.core.sequence_validator import (
     validate_movement_sequence,
 )
 from app.core.situation_builder import build_situation_from_telemetry
-from app.llm.command_extractor import extract_command
 from app.llm.movement_prompt_builder import build_mvp9_movement_prompt
 from app.llm.ollama_client import OllamaClient
-from app.llm.prompt_builder import build_mvp3_prompt
 from app.llm.sequence_extractor import extract_sequence
 
 
@@ -113,12 +113,10 @@ class MainWindow(QMainWindow):
             if configured_commands
             else get_mvp9_manual_commands()
         )
-        self.llm_allowed_commands = get_mvp3_allowed_commands()
-
         self.manual_buttons: list[QPushButton] = []
 
         self.setWindowTitle("Geo Ground Control Station")
-        self.resize(920, 720)
+        self.resize(1220, 760)
         self._build_ui()
         self._apply_dark_theme()
         self._set_status("Ready")
@@ -128,22 +126,48 @@ class MainWindow(QMainWindow):
         root = QWidget()
         root.setObjectName("appRoot")
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(14)
+        root_layout.setContentsMargins(16, 16, 16, 16)
+        root_layout.setSpacing(12)
 
-        root_layout.addWidget(self._build_connection_section())
-        root_layout.addWidget(self._build_telemetry_section())
-        root_layout.addWidget(self._build_manual_section())
-        root_layout.addWidget(self._build_llm_section())
-        root_layout.addWidget(self._build_movement_sequence_section())
-        root_layout.addWidget(self._build_experience_memory_section())
-        root_layout.addWidget(self._build_log_section(), stretch=1)
+        workspace_layout = QHBoxLayout()
+        workspace_layout.setSpacing(12)
+
+        left_column = QWidget()
+        left_column.setObjectName("columnPanel")
+        left_column.setMinimumWidth(360)
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+        left_layout.addWidget(self._build_connection_section())
+        left_layout.addWidget(self._build_telemetry_section())
+        left_layout.addWidget(self._build_manual_section())
+        left_layout.addWidget(self._build_log_section(), stretch=1)
+
+        right_column = QWidget()
+        right_column.setObjectName("columnPanel")
+        right_column.setMinimumWidth(620)
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+        right_layout.addWidget(self._build_workflow_tabs(), stretch=1)
+
+        workspace_layout.addWidget(left_column, stretch=1)
+        workspace_layout.addWidget(right_column, stretch=2)
+        root_layout.addLayout(workspace_layout, stretch=1)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QScrollArea.NoFrame)
         scroll_area.setWidget(root)
         self.setCentralWidget(scroll_area)
+
+    def _build_workflow_tabs(self) -> QTabWidget:
+        tabs = QTabWidget()
+        tabs.setObjectName("workflowTabs")
+        tabs.tabBar().setExpanding(False)
+        tabs.addTab(self._build_movement_sequence_section(), "Movement Sequence")
+        tabs.addTab(self._build_experience_memory_section(), "Experience Memory")
+        return tabs
 
     def _apply_dark_theme(self) -> None:
         self.setStyleSheet(
@@ -162,11 +186,11 @@ class MainWindow(QMainWindow):
             QGroupBox {
                 background: #1E1E1E;
                 border: 1px solid #2a2a2a;
-                border-radius: 10px;
+                border-radius: 8px;
                 color: #E5E7EB;
                 font-weight: 600;
-                margin-top: 12px;
-                padding: 16px 12px 12px 12px;
+                margin-top: 10px;
+                padding: 12px 10px 10px 10px;
             }
 
             QGroupBox::title {
@@ -177,17 +201,54 @@ class MainWindow(QMainWindow):
                 color: #b9b9b9;
             }
 
+            QTabWidget#workflowTabs::pane {
+                background: #1E1E1E;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                top: -1px;
+            }
+
+            QTabWidget#workflowTabs::tab-bar {
+                alignment: left;
+                left: 0px;
+            }
+
+            QTabWidget#workflowTabs QTabBar::tab {
+                background: #181818;
+                border: 1px solid #2a2a2a;
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                color: #9CA3AF;
+                font-weight: 700;
+                min-width: 160px;
+                padding: 8px 16px;
+            }
+
+            QTabWidget#workflowTabs QTabBar::tab:selected {
+                background: #1E1E1E;
+                color: #E5E7EB;
+            }
+
+            QTabWidget#workflowTabs QTabBar::tab:hover {
+                color: #E5E7EB;
+            }
+
+            QWidget#tabPage {
+                background: #1E1E1E;
+            }
+
             QLabel {
                 color: #dddddd;
             }
 
             QPushButton {
                 background: #1F2937;
-                border-radius: 8px;
+                border-radius: 6px;
                 color: #E5E7EB;
                 font-weight: 600;
-                min-height: 34px;
-                padding: 7px 14px;
+                min-height: 30px;
+                padding: 5px 10px;
             }
 
             QPushButton:hover {
@@ -200,7 +261,7 @@ class MainWindow(QMainWindow):
 
             QPushButton:disabled {
                 background: #242424;
-                color: #E5E7EB;
+                color: #6B7280;
             }
 
             QPushButton#stopButton {
@@ -214,6 +275,20 @@ class MainWindow(QMainWindow):
 
             QPushButton#stopButton:disabled {
                 background: #2e2024;
+                color: #8f8588;
+            }
+
+            QPushButton#dangerButton {
+                background: #4a2328;
+                color: #fee2e2;
+            }
+
+            QPushButton#dangerButton:hover {
+                background: #5b2a30;
+            }
+
+            QPushButton#dangerButton:disabled {
+                background: #2c2022;
                 color: #8f8588;
             }
 
@@ -232,9 +307,9 @@ class MainWindow(QMainWindow):
             QTextEdit {
                 background: #181818;
                 border: 1px solid #303030;
-                border-radius: 8px;
+                border-radius: 6px;
                 color: #f0f0f0;
-                padding: 9px;
+                padding: 7px;
                 selection-background-color: #2563eb;
                 selection-color: #ffffff;
             }
@@ -246,6 +321,25 @@ class MainWindow(QMainWindow):
                 border-color: #60a5fa;
             }
 
+            QComboBox QAbstractItemView {
+                background: #181818;
+                border: 1px solid #303030;
+                color: #E5E7EB;
+                outline: 0px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
+
+            QComboBox QAbstractItemView::item {
+                min-height: 28px;
+                padding: 6px 8px;
+            }
+
+            QComboBox QAbstractItemView::item:hover {
+                background: #243244;
+                color: #ffffff;
+            }
+
             QLineEdit::placeholder {
                 color: #6f7f91;
             }
@@ -255,9 +349,29 @@ class MainWindow(QMainWindow):
             }
 
             QLabel#stateBadge {
-                border-radius: 8px;
+                border-radius: 6px;
                 font-weight: 700;
-                padding: 8px 10px;
+                padding: 6px 8px;
+            }
+
+            QLabel#sectionTitle,
+            QLabel#sensorName {
+                color: #9CA3AF;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0px;
+                text-transform: uppercase;
+            }
+
+            QLabel#sensorValue {
+                background: #181818;
+                border: 1px solid #303030;
+                border-radius: 6px;
+                color: #E5E7EB;
+                font-size: 14px;
+                font-weight: 700;
+                min-height: 26px;
+                padding: 4px 6px;
             }
             """
         )
@@ -268,6 +382,8 @@ class MainWindow(QMainWindow):
 
         group = QGroupBox("Connection / Status")
         layout = QFormLayout(group)
+        layout.setVerticalSpacing(8)
+        layout.setHorizontalSpacing(10)
 
         esp32_host = esp32_config.get("host", "192.168.4.1")
         esp32_port = esp32_config.get("port", 4210)
@@ -284,9 +400,13 @@ class MainWindow(QMainWindow):
 
         return group
 
-    def _build_movement_sequence_section(self) -> QGroupBox:
-        group = QGroupBox("LLM Movement Sequence")
-        layout = QVBoxLayout(group)
+    def _build_movement_sequence_section(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("tabPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        layout.setAlignment(Qt.AlignTop)
 
         prompt_row = QHBoxLayout()
         self.movement_prompt_input = QLineEdit()
@@ -296,6 +416,10 @@ class MainWindow(QMainWindow):
         self.movement_prompt_input.returnPressed.connect(
             self.generate_movement_sequence
         )
+        prompt_row.addWidget(self.movement_prompt_input, stretch=1)
+        layout.addLayout(prompt_row)
+
+        action_row = QHBoxLayout()
         self.generate_sequence_button = QPushButton("Generate Movement Sequence")
         self.generate_sequence_button.clicked.connect(self.generate_movement_sequence)
         self.execute_sequence_button = QPushButton("Execute Validated Sequence")
@@ -303,22 +427,21 @@ class MainWindow(QMainWindow):
         self.movement_stop_button = QPushButton("Stop")
         self.movement_stop_button.setObjectName("stopButton")
         self.movement_stop_button.clicked.connect(self.stop_movement_sequence)
-
-        prompt_row.addWidget(self.movement_prompt_input, stretch=1)
-        prompt_row.addWidget(self.generate_sequence_button)
-        prompt_row.addWidget(self.execute_sequence_button)
-        prompt_row.addWidget(self.movement_stop_button)
-        layout.addLayout(prompt_row)
+        action_row.addWidget(self.generate_sequence_button)
+        action_row.addWidget(self.execute_sequence_button)
+        action_row.addWidget(self.movement_stop_button)
+        action_row.addStretch(1)
+        layout.addLayout(action_row)
 
         self.movement_raw_output = QTextEdit()
         self.movement_raw_output.setReadOnly(True)
-        self.movement_raw_output.setFixedHeight(90)
+        self.movement_raw_output.setFixedHeight(72)
         layout.addWidget(QLabel("Raw LLM Output:"))
         layout.addWidget(self.movement_raw_output)
 
         self.parsed_sequence_output = QTextEdit()
         self.parsed_sequence_output.setReadOnly(True)
-        self.parsed_sequence_output.setFixedHeight(100)
+        self.parsed_sequence_output.setFixedHeight(78)
         layout.addWidget(QLabel("Parsed Sequence:"))
         layout.addWidget(self.parsed_sequence_output)
 
@@ -330,18 +453,26 @@ class MainWindow(QMainWindow):
 
         self.sequence_execution_log = QTextEdit()
         self.sequence_execution_log.setReadOnly(True)
-        self.sequence_execution_log.setFixedHeight(120)
+        self.sequence_execution_log.setFixedHeight(96)
         layout.addWidget(QLabel("Execution Log:"))
         layout.addWidget(self.sequence_execution_log)
 
         self._update_movement_buttons()
-        return group
+        return page
 
-    def _build_experience_memory_section(self) -> QGroupBox:
-        group = QGroupBox("Experience Memory")
-        layout = QVBoxLayout(group)
+    def _build_experience_memory_section(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("tabPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         form = QFormLayout()
+        form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
         self.experience_instruction_input = QLineEdit()
         self.experience_instruction_input.setPlaceholderText(
             "Prompt used for the movement sequence"
@@ -382,6 +513,9 @@ class MainWindow(QMainWindow):
         self.use_feedback_button.clicked.connect(self.capture_trial_feedback)
         self.clear_feedback_button = QPushButton("Clear Feedback")
         self.clear_feedback_button.clicked.connect(self.clear_trial_feedback)
+        self.delete_experiences_button = QPushButton("Delete All Experiences")
+        self.delete_experiences_button.setObjectName("dangerButton")
+        self.delete_experiences_button.clicked.connect(self.delete_all_experiences)
 
         button_row.addWidget(self.save_experience_button, 0, 0)
         button_row.addWidget(self.find_experience_button, 0, 1)
@@ -389,12 +523,13 @@ class MainWindow(QMainWindow):
         button_row.addWidget(self.find_load_best_button, 1, 1)
         button_row.addWidget(self.use_feedback_button, 2, 0)
         button_row.addWidget(self.clear_feedback_button, 2, 1)
+        button_row.addWidget(self.delete_experiences_button, 3, 0, 1, 2)
         layout.addLayout(button_row)
 
         self.experience_matches_list = QListWidget()
-        self.experience_matches_list.setFixedHeight(150)
+        self.experience_matches_list.setMinimumHeight(150)
         layout.addWidget(QLabel("Similar Experiences:"))
-        layout.addWidget(self.experience_matches_list)
+        layout.addWidget(self.experience_matches_list, stretch=1)
 
         self.experience_status_label = QLabel("-")
         self.experience_status_label.setWordWrap(True)
@@ -402,11 +537,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.experience_status_label)
 
         self._update_experience_buttons()
-        return group
+        return page
 
     def _build_telemetry_section(self) -> QGroupBox:
         group = QGroupBox("Telemetry")
         layout = QVBoxLayout(group)
+        layout.setSpacing(8)
 
         button_row = QHBoxLayout()
         self.start_telemetry_button = QPushButton("Start Telemetry")
@@ -419,7 +555,6 @@ class MainWindow(QMainWindow):
         button_row.addStretch(1)
         layout.addLayout(button_row)
 
-        form = QFormLayout()
         self.fl_distance_label = self._make_value_label("-")
         self.fc_distance_label = self._make_value_label("-")
         self.fr_distance_label = self._make_value_label("-")
@@ -432,17 +567,30 @@ class MainWindow(QMainWindow):
         self.last_telemetry_label = self._make_value_label("Never")
         self.telemetry_status_label = self._make_value_label("Disconnected")
 
-        form.addRow("Front Left:", self.fl_distance_label)
-        form.addRow("Front Center:", self.fc_distance_label)
-        form.addRow("Front Right:", self.fr_distance_label)
-        form.addRow("Left:", self.left_distance_label)
-        form.addRow("Right:", self.right_distance_label)
-        form.addRow("Robot State:", self.robot_state_label)
-        form.addRow("Uptime:", self.uptime_label)
-        form.addRow("Firmware:", self.firmware_label)
-        form.addRow("Last Telemetry:", self.last_telemetry_label)
-        form.addRow("Telemetry Status:", self.telemetry_status_label)
-        layout.addLayout(form)
+        sensor_grid = QGridLayout()
+        sensor_grid.setHorizontalSpacing(8)
+        sensor_grid.setVerticalSpacing(4)
+        self._add_sensor_readout(sensor_grid, 0, 0, "Front Left", self.fl_distance_label)
+        self._add_sensor_readout(sensor_grid, 0, 1, "Front Center", self.fc_distance_label)
+        self._add_sensor_readout(sensor_grid, 0, 2, "Front Right", self.fr_distance_label)
+        self._add_sensor_readout(sensor_grid, 1, 0, "Left", self.left_distance_label)
+        self._add_sensor_readout(sensor_grid, 1, 1, "Right", self.right_distance_label)
+        layout.addLayout(sensor_grid)
+
+        status_grid = QGridLayout()
+        status_grid.setHorizontalSpacing(8)
+        status_grid.setVerticalSpacing(4)
+        status_grid.addWidget(QLabel("Robot State:"), 0, 0, Qt.AlignRight)
+        status_grid.addWidget(self.robot_state_label, 0, 1, 1, 3)
+        status_grid.addWidget(QLabel("Uptime:"), 1, 0, Qt.AlignRight)
+        status_grid.addWidget(self.uptime_label, 1, 1)
+        status_grid.addWidget(QLabel("Firmware:"), 1, 2, Qt.AlignRight)
+        status_grid.addWidget(self.firmware_label, 1, 3)
+        status_grid.addWidget(QLabel("Last:"), 2, 0, Qt.AlignRight)
+        status_grid.addWidget(self.last_telemetry_label, 2, 1)
+        status_grid.addWidget(QLabel("Stream:"), 2, 2, Qt.AlignRight)
+        status_grid.addWidget(self.telemetry_status_label, 2, 3)
+        layout.addLayout(status_grid)
 
         self._apply_state_style("FRONT_UNKNOWN")
         self._update_telemetry_buttons()
@@ -454,61 +602,87 @@ class MainWindow(QMainWindow):
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return label
 
+    def _add_sensor_readout(
+        self,
+        layout: QGridLayout,
+        row: int,
+        column: int,
+        title: str,
+        value_label: QLabel,
+    ) -> None:
+        title_label = QLabel(title)
+        title_label.setObjectName("sensorName")
+        title_label.setAlignment(Qt.AlignCenter)
+        value_label.setObjectName("sensorValue")
+        value_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label, row * 2, column)
+        layout.addWidget(value_label, row * 2 + 1, column)
+
     def _build_manual_section(self) -> QGroupBox:
         group = QGroupBox("Manual Command")
-        layout = QGridLayout(group)
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
 
-        for index, command in enumerate(self.allowed_commands):
-            button_label = "FWD (manual/test)" if command == "FWD" else command
+        command_groups = [
+            ("System", ("PING", "STATUS", "DIST"), 3),
+            (
+                "Motion / Test",
+                ("FWD", "SAFE_FWD", "BACK", "LEFT", "RIGHT", "CW", "CCW", "STOP"),
+                4,
+            ),
+        ]
+        hidden_manual_commands = {"STREAM_ON", "STREAM_OFF"}
+        grouped_commands = {
+            command
+            for _title, commands, _columns in command_groups
+            for command in commands
+        }
+
+        for title, commands, columns in command_groups:
+            available = [command for command in commands if command in self.allowed_commands]
+            if available:
+                self._add_manual_command_group(layout, title, available, columns)
+
+        other_commands = [
+            command
+            for command in self.allowed_commands
+            if command not in grouped_commands
+            and command not in hidden_manual_commands
+        ]
+        if other_commands:
+            self._add_manual_command_group(layout, "Other", other_commands, 3)
+
+        return group
+
+    def _add_manual_command_group(
+        self,
+        parent_layout: QVBoxLayout,
+        title: str,
+        commands: list[str],
+        columns: int,
+    ) -> None:
+        title_label = QLabel(title)
+        title_label.setObjectName("sectionTitle")
+        parent_layout.addWidget(title_label)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+
+        for index, command in enumerate(commands):
+            button_label = "FWD TEST" if command == "FWD" else command
             button = QPushButton(button_label)
+            if command == "FWD":
+                button.setToolTip("Manual/test raw forward command")
             if command == "STOP":
                 button.setObjectName("stopButton")
             button.clicked.connect(
                 lambda _checked=False, value=command: self.send_manual_command(value)
             )
             self.manual_buttons.append(button)
-            layout.addWidget(button, index // 4, index % 4)
+            grid.addWidget(button, index // columns, index % columns)
 
-        return group
-
-    def _build_llm_section(self) -> QGroupBox:
-        group = QGroupBox("LLM Prompt")
-        layout = QVBoxLayout(group)
-
-        prompt_row = QHBoxLayout()
-        self.prompt_input = QLineEdit()
-        self.prompt_input.setPlaceholderText("light up the room")
-        self.prompt_input.returnPressed.connect(self.ask_llm_and_send)
-        self.ask_button = QPushButton("Ask LLM and Send")
-        self.ask_button.clicked.connect(self.ask_llm_and_send)
-        prompt_row.addWidget(self.prompt_input, stretch=1)
-        prompt_row.addWidget(self.ask_button)
-        layout.addLayout(prompt_row)
-
-        self.raw_llm_output = QTextEdit()
-        self.raw_llm_output.setReadOnly(True)
-        self.raw_llm_output.setFixedHeight(90)
-        layout.addWidget(QLabel("Raw LLM Output:"))
-        layout.addWidget(self.raw_llm_output)
-
-        form = QFormLayout()
-        self.extracted_command_label = QLabel("-")
-        self.validation_result_label = QLabel("-")
-        self.esp32_reply_label = QLabel("-")
-        for label in (
-            self.extracted_command_label,
-            self.validation_result_label,
-            self.esp32_reply_label,
-        ):
-            label.setWordWrap(True)
-            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-
-        form.addRow("Extracted Command:", self.extracted_command_label)
-        form.addRow("Validation Result:", self.validation_result_label)
-        form.addRow("ESP32 Reply:", self.esp32_reply_label)
-        layout.addLayout(form)
-
-        return group
+        parent_layout.addLayout(grid)
 
     def _build_log_section(self) -> QGroupBox:
         group = QGroupBox("Log")
@@ -516,6 +690,7 @@ class MainWindow(QMainWindow):
 
         self.log_panel = QTextEdit()
         self.log_panel.setReadOnly(True)
+        self.log_panel.setMinimumHeight(120)
         layout.addWidget(self.log_panel)
 
         return group
@@ -618,68 +793,6 @@ class MainWindow(QMainWindow):
 
         self._set_telemetry_status("Stopping listener")
         self.telemetry_receiver.request_stop()
-
-    def ask_llm_and_send(self) -> None:
-        user_prompt = self.prompt_input.text().strip()
-        if not user_prompt:
-            self.log_message("Enter a prompt before asking the LLM")
-            return
-
-        self._set_field("raw_llm_output", "")
-        self._set_field("extracted_command", "-")
-        self._set_field("validation_result", "-")
-        self._set_field("esp32_reply", "-")
-
-        def task(signals: WorkerSignals) -> None:
-            signals.status.emit("Calling Ollama")
-            signals.log.emit(f"User prompt: {user_prompt}")
-
-            prompt = build_mvp3_prompt(user_prompt)
-            ollama_client = self._make_ollama_client()
-            if not ollama_client.check_connection():
-                raise ConnectionError(
-                    "Ollama is not reachable. Start it with 'ollama serve' "
-                    "and confirm config/default.yaml points to the right base_url."
-                )
-
-            raw_output = ollama_client.generate(prompt)
-            signals.field.emit("raw_llm_output", raw_output)
-            signals.log.emit(f"Raw LLM output: {raw_output!r}")
-
-            try:
-                extracted_command = extract_command(
-                    raw_output,
-                    self.llm_allowed_commands,
-                )
-            except ValueError as exc:
-                signals.field.emit("validation_result", f"Rejected: {exc}")
-                raise
-
-            signals.field.emit("extracted_command", extracted_command)
-            signals.log.emit(f"Extracted command: {extracted_command}")
-
-            try:
-                validated = validate_command(
-                    extracted_command,
-                    self.llm_allowed_commands,
-                )
-            except ValueError as exc:
-                signals.field.emit("validation_result", f"Rejected: {exc}")
-                raise
-
-            signals.field.emit("validation_result", f"Accepted: {validated}")
-            signals.log.emit(f"Validation result: accepted {validated}")
-
-            signals.status.emit(f"Sending {validated}")
-            reply = self._make_udp_client().send_message(
-                validated,
-                ignore_prefixes=("TEL",),
-            )
-            signals.field.emit("esp32_reply", reply)
-            signals.log.emit(f"ESP32 reply: {reply}")
-            signals.status.emit("Ready")
-
-        self._run_task(task)
 
     def generate_movement_sequence(self) -> None:
         user_prompt = self.movement_prompt_input.text().strip()
@@ -958,6 +1071,40 @@ class MainWindow(QMainWindow):
     def find_similar_experiences(self) -> None:
         matches = self._find_similar_experience_matches(success_only=False)
         self._show_experience_matches(matches)
+
+    def delete_all_experiences(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Delete All Experiences",
+            (
+                "Delete all saved experiences from local memory?\n\n"
+                f"{self.experience_store.path}\n\n"
+                "This cannot be undone."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            self.log_message("Delete all experiences cancelled")
+            return
+
+        try:
+            deleted_count = self.experience_store.delete_all()
+        except Exception as exc:  # noqa: BLE001 - keep UI alive.
+            self.log_message(f"ERROR: Failed to delete experiences: {exc}")
+            return
+
+        self.experience_matches = []
+        self.experience_matches_list.clear()
+        self._set_field(
+            "experience_status",
+            f"Deleted {deleted_count} saved experience(s)",
+        )
+        self.log_message(
+            f"Deleted {deleted_count} saved experience(s) from "
+            f"{self.experience_store.path}"
+        )
+        self._update_experience_buttons()
 
     def load_selected_experience_sequence(self) -> None:
         if not self.experience_matches:
@@ -1274,15 +1421,7 @@ class MainWindow(QMainWindow):
         )
 
     def _set_field(self, field_name: str, value: str) -> None:
-        if field_name == "raw_llm_output":
-            self.raw_llm_output.setPlainText(value)
-        elif field_name == "extracted_command":
-            self.extracted_command_label.setText(value)
-        elif field_name == "validation_result":
-            self.validation_result_label.setText(value)
-        elif field_name == "esp32_reply":
-            self.esp32_reply_label.setText(value)
-        elif field_name == "movement_raw_output":
+        if field_name == "movement_raw_output":
             self.movement_raw_output.setPlainText(value)
         elif field_name == "parsed_sequence":
             self.parsed_sequence_output.setPlainText(value)
@@ -1311,7 +1450,6 @@ class MainWindow(QMainWindow):
         self.busy = busy
         for button in self.manual_buttons:
             button.setEnabled(not busy)
-        self.ask_button.setEnabled(not busy)
         self._update_telemetry_buttons()
         self._update_movement_buttons()
         self._update_experience_buttons()
@@ -1364,6 +1502,7 @@ class MainWindow(QMainWindow):
         self.load_experience_button.setEnabled(not self.busy and has_matches)
         self.use_feedback_button.setEnabled(not self.busy and has_sequence)
         self.clear_feedback_button.setEnabled(not self.busy and has_feedback)
+        self.delete_experiences_button.setEnabled(not self.busy)
 
     def log_message(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")

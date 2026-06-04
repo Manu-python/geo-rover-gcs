@@ -411,6 +411,11 @@ the experience.
 Logs are written under `logs/`. Experience records are written under `data/`.
 Both are local runtime data and should not be committed.
 
+The `Delete All Experiences` button in the Experience Memory tab removes the
+local `data/experiences.jsonl` memory file after confirmation and clears the
+visible match list. It does not delete logs and does not change the currently
+validated movement sequence.
+
 To archive a test campaign:
 
 ```bash

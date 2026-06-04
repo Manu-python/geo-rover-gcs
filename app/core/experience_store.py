@@ -40,6 +40,17 @@ class ExperienceStore:
             file.write(json.dumps(experience_record_to_dict(record), sort_keys=True))
             file.write("\n")
 
+    def delete_all(self) -> int:
+        if not self.path.is_file():
+            return 0
+
+        deleted_count = 0
+        with self.path.open("r", encoding="utf-8") as file:
+            deleted_count = sum(1 for line in file if line.strip())
+
+        self.path.unlink()
+        return deleted_count
+
     def find_similar(
         self,
         current_situation: ExperienceSituation,
