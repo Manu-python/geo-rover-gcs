@@ -43,7 +43,10 @@ from app.core.experience_store import ExperienceStore
 from app.core.movement_sequence import MovementSequence
 from app.core.safety_validator import validate_command
 from app.core.sequence_feedback import adjust_sequence_from_feedback
-from app.core.sequence_validator import validate_movement_sequence
+from app.core.sequence_validator import (
+    movement_sequence_warnings,
+    validate_movement_sequence,
+)
 from app.core.situation_builder import build_situation_from_telemetry
 from app.llm.command_extractor import extract_command
 from app.llm.movement_prompt_builder import build_mvp9_movement_prompt
@@ -101,7 +104,10 @@ class MainWindow(QMainWindow):
         self.experience_store = ExperienceStore(str(self._resolve_experience_path()))
         self.experience_matches: list[tuple[ExperienceRecord, float]] = []
 
-        configured_commands = config.get("safety", {}).get("allowed_commands")
+        configured_commands = config.get("movement", {}).get(
+            "manual_commands",
+            config.get("safety", {}).get("allowed_commands"),
+        )
         self.allowed_commands = (
             list(configured_commands)
             if configured_commands
@@ -144,20 +150,20 @@ class MainWindow(QMainWindow):
             """
             QMainWindow {
                 background: #121212;
-                color: #e8edf2;
+                color: #E5E7EB;
             }
 
             QWidget#appRoot {
                 background: #121212;
-                color: #e8edf2;
+                color: #E5E7EB;
                 font-size: 13px;
             }
 
             QGroupBox {
-                background: #1a1a1a;
+                background: #1E1E1E;
                 border: 1px solid #2a2a2a;
                 border-radius: 10px;
-                color: #f3f6f9;
+                color: #E5E7EB;
                 font-weight: 600;
                 margin-top: 12px;
                 padding: 16px 12px 12px 12px;
@@ -176,7 +182,7 @@ class MainWindow(QMainWindow):
             }
 
             QPushButton {
-                background: #1E293B;
+                background: #1F2937;
                 border-radius: 8px;
                 color: #E5E7EB;
                 font-weight: 600;
@@ -185,7 +191,7 @@ class MainWindow(QMainWindow):
             }
 
             QPushButton:hover {
-                background: #273449;
+                background: #2B3648;
             }
 
             QPushButton:pressed {
@@ -198,12 +204,12 @@ class MainWindow(QMainWindow):
             }
 
             QPushButton#stopButton {
-                background: #5b2530;
+                background: #8f2d2d;
                 color: #fff1f2;
             }
 
             QPushButton#stopButton:hover {
-                background: #6f2f3d;
+                background: #a63737;
             }
 
             QPushButton#stopButton:disabled {
@@ -414,15 +420,23 @@ class MainWindow(QMainWindow):
         layout.addLayout(button_row)
 
         form = QFormLayout()
-        self.front_distance_label = self._make_value_label("-")
+        self.fl_distance_label = self._make_value_label("-")
+        self.fc_distance_label = self._make_value_label("-")
+        self.fr_distance_label = self._make_value_label("-")
+        self.left_distance_label = self._make_value_label("-")
+        self.right_distance_label = self._make_value_label("-")
         self.robot_state_label = self._make_value_label("FRONT_UNKNOWN - unknown")
         self.robot_state_label.setObjectName("stateBadge")
         self.uptime_label = self._make_value_label("-")
         self.firmware_label = self._make_value_label("-")
         self.last_telemetry_label = self._make_value_label("Never")
-        self.telemetry_status_label = self._make_value_label("Stopped")
+        self.telemetry_status_label = self._make_value_label("Disconnected")
 
-        form.addRow("Front Distance:", self.front_distance_label)
+        form.addRow("Front Left:", self.fl_distance_label)
+        form.addRow("Front Center:", self.fc_distance_label)
+        form.addRow("Front Right:", self.fr_distance_label)
+        form.addRow("Left:", self.left_distance_label)
+        form.addRow("Right:", self.right_distance_label)
         form.addRow("Robot State:", self.robot_state_label)
         form.addRow("Uptime:", self.uptime_label)
         form.addRow("Firmware:", self.firmware_label)
@@ -445,7 +459,8 @@ class MainWindow(QMainWindow):
         layout = QGridLayout(group)
 
         for index, command in enumerate(self.allowed_commands):
-            button = QPushButton(command)
+            button_label = "FWD (manual/test)" if command == "FWD" else command
+            button = QPushButton(button_label)
             if command == "STOP":
                 button.setObjectName("stopButton")
             button.clicked.connect(
@@ -597,7 +612,7 @@ class MainWindow(QMainWindow):
     def _stop_telemetry_receiver(self) -> None:
         if self.telemetry_receiver is None:
             self.telemetry_running = False
-            self._set_telemetry_status("Stopped")
+            self._set_telemetry_status("Disconnected")
             self._update_telemetry_buttons()
             return
 
@@ -746,11 +761,22 @@ class MainWindow(QMainWindow):
             )
             for message in feedback_messages:
                 signals.log.emit(message)
+            warning_messages = movement_sequence_warnings(
+                sequence,
+                latest_telemetry=telemetry_snapshot,
+                config=self.config,
+            )
+            for message in warning_messages:
+                signals.log.emit(f"Validation warning: {message}")
 
             signals.sequence.emit((sequence, situation_snapshot))
             signals.field.emit(
                 "sequence_validation",
-                self._format_sequence_validation(sequence, feedback_messages),
+                self._format_sequence_validation(
+                    sequence,
+                    feedback_messages,
+                    warning_messages,
+                ),
             )
             signals.field.emit("parsed_sequence", self._format_sequence(sequence))
             signals.log.emit("Movement sequence validated")
@@ -924,7 +950,8 @@ class MainWindow(QMainWindow):
         )
         self.log_message(
             f"Saved experience {record.id}: {situation.state}, "
-            f"{situation.front_bucket}, outcome={record.outcome}"
+            f"front={situation.front_bucket}, left={situation.left_bucket}, "
+            f"right={situation.right_bucket}, outcome={record.outcome}"
         )
         self._capture_trial_feedback_from_fields(sequence, log_to_panel=False)
 
@@ -972,12 +999,13 @@ class MainWindow(QMainWindow):
 
         experience_config = self.config.get("experience", {})
         min_score = float(experience_config.get("min_similarity_score", 0.6))
+        max_results = int(experience_config.get("max_results", 3))
         situation = build_situation_from_telemetry(self.latest_telemetry)
 
         try:
             matches = self.experience_store.find_similar(
                 situation,
-                limit=None,
+                limit=max_results,
             )
         except Exception as exc:  # noqa: BLE001 - keep UI alive.
             self.log_message(f"ERROR: Failed to search experiences: {exc}")
@@ -992,7 +1020,8 @@ class MainWindow(QMainWindow):
 
         self.log_message(
             f"Found {len(filtered)} similar experience(s) for "
-            f"{situation.state}/{situation.front_bucket}"
+            f"{situation.state}/front={situation.front_bucket}/"
+            f"left={situation.left_bucket}/right={situation.right_bucket}"
         )
         return filtered
 
@@ -1069,7 +1098,15 @@ class MainWindow(QMainWindow):
         notes_text = f" | notes: {record.notes}" if record.notes else ""
         return (
             f"score={score:.2f} | {record.situation.state} | "
-            f"{record.situation.front_bucket} | {sequence_text} | "
+            f"front={record.situation.front_bucket} "
+            f"left={record.situation.left_bucket} "
+            f"right={record.situation.right_bucket} | "
+            f"FL={self._format_distance(record.situation.fl_cm)} "
+            f"FC={self._format_distance(record.situation.fc_cm)} "
+            f"FR={self._format_distance(record.situation.fr_cm)} "
+            f"L={self._format_distance(record.situation.l_cm)} "
+            f"R={self._format_distance(record.situation.r_cm)} | "
+            f"{sequence_text} | "
             f"{record.outcome} | {record.timestamp} | {record.user_instruction}"
             f"{notes_text}"
         )
@@ -1091,22 +1128,24 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def _handle_telemetry(self, telemetry: dict) -> None:
+        received_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.latest_telemetry = dict(telemetry)
+        self.latest_telemetry["last_received_time"] = received_at
         self._update_experience_buttons()
-        front_cm = telemetry.get("front_cm")
-        if isinstance(front_cm, (int, float)):
-            self.front_distance_label.setText(f"{front_cm:.1f} cm")
-        else:
-            self.front_distance_label.setText("-")
 
+        self.fl_distance_label.setText(self._format_distance(telemetry.get("fl_cm")))
+        self.fc_distance_label.setText(
+            self._format_distance(telemetry.get("fc_cm", telemetry.get("front_cm")))
+        )
+        self.fr_distance_label.setText(self._format_distance(telemetry.get("fr_cm")))
+        self.left_distance_label.setText(self._format_distance(telemetry.get("l_cm")))
+        self.right_distance_label.setText(self._format_distance(telemetry.get("r_cm")))
         state = str(telemetry.get("state", "FRONT_UNKNOWN"))
         self._apply_state_style(state)
         self.uptime_label.setText(self._format_uptime(telemetry.get("uptime_ms")))
         self.firmware_label.setText(str(telemetry.get("fw", "-")))
-        self.last_telemetry_label.setText(
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
-        self._set_telemetry_status("Receiving telemetry")
+        self.last_telemetry_label.setText(received_at)
+        self._set_telemetry_status("Live")
 
     def _handle_telemetry_error(self, message: str) -> None:
         self._set_telemetry_status("Error")
@@ -1114,14 +1153,14 @@ class MainWindow(QMainWindow):
 
     def _handle_telemetry_stale(self) -> None:
         stale_timeout_s = self.config.get("telemetry", {}).get("stale_timeout_s", 2.0)
-        self._set_telemetry_status(f"No telemetry for {stale_timeout_s}s")
+        self._set_telemetry_status(f"Stale: no telemetry for {stale_timeout_s}s")
         self.log_message(f"No telemetry received for {stale_timeout_s}s")
 
     def _handle_telemetry_stopped(self) -> None:
         self.telemetry_running = False
         self.telemetry_receiver = None
         self.telemetry_thread = None
-        self._set_telemetry_status("Stopped")
+        self._set_telemetry_status("Disconnected")
         self._update_telemetry_buttons()
         self.log_message("Telemetry listener stopped")
 
@@ -1131,19 +1170,35 @@ class MainWindow(QMainWindow):
         seconds = uptime_ms / 1000
         return f"{seconds:.1f} s ({uptime_ms} ms)"
 
+    def _format_distance(self, distance_cm: object) -> str:
+        if not isinstance(distance_cm, (int, float)):
+            return "-"
+        if float(distance_cm) == -1:
+            return "-1.0 cm (unavailable)"
+        return f"{float(distance_cm):.1f} cm"
+
     def _apply_state_style(self, state: str) -> None:
         state = state.upper()
         if state == "FRONT_CLEAR":
-            text = "FRONT_CLEAR - clear/safe"
+            state = "CLEAR"
+
+        if state == "CLEAR":
+            text = "CLEAR - clear/safe"
             style = (
-                "background: #17372a; border: 1px solid #2d6a4f; "
+                "background: #12342c; border: 1px solid #00C896; "
                 "color: #d8f3dc;"
             )
-        elif state == "BLOCKED_FRONT":
-            text = "BLOCKED_FRONT - blocked/warning"
+        elif state in {"BLOCKED_FRONT", "BLOCKED_LEFT", "BLOCKED_RIGHT"}:
+            text = f"{state} - blocked/warning"
             style = (
-                "background: #49351f; border: 1px solid #8a6a32; "
+                "background: #49351f; border: 1px solid #FFB020; "
                 "color: #ffe8b6;"
+            )
+        elif state in {"FRONT_UNKNOWN", "SENSOR_ERROR"}:
+            text = f"{state} - caution"
+            style = (
+                "background: #35312a; border: 1px solid #9f7a2e; "
+                "color: #f5e6bf;"
             )
         else:
             text = f"{state} - unknown"
@@ -1191,10 +1246,13 @@ class MainWindow(QMainWindow):
         self,
         sequence: MovementSequence,
         feedback_messages: list[str],
+        warning_messages: list[str],
     ) -> str:
         result = f"Accepted: {len(sequence.steps)} validated step(s)"
         if feedback_messages:
             result += f"; applied {len(feedback_messages)} feedback adjustment(s)"
+        if warning_messages:
+            result += "\nWarnings:\n" + "\n".join(f"- {item}" for item in warning_messages)
         return result
 
     def _format_situation_snapshot(
@@ -1204,14 +1262,15 @@ class MainWindow(QMainWindow):
         if situation is None:
             return "No pre-action snapshot captured"
 
-        front_cm = (
-            "unknown"
-            if situation.front_cm is None
-            else f"{situation.front_cm:.1f} cm"
-        )
         return (
-            f"{situation.state}, front={front_cm}, "
-            f"bucket={situation.front_bucket}"
+            f"{situation.state}; "
+            f"FL={self._format_distance(situation.fl_cm)}, "
+            f"FC={self._format_distance(situation.fc_cm)}, "
+            f"FR={self._format_distance(situation.fr_cm)}, "
+            f"L={self._format_distance(situation.l_cm)}, "
+            f"R={self._format_distance(situation.r_cm)}; "
+            f"buckets: front={situation.front_bucket}, "
+            f"left={situation.left_bucket}, right={situation.right_bucket}"
         )
 
     def _set_field(self, field_name: str, value: str) -> None:

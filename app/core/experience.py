@@ -9,7 +9,14 @@ from app.core.movement_sequence import MovementStep
 class ExperienceSituation:
     state: str
     front_cm: float | None
+    fl_cm: float | None
+    fc_cm: float | None
+    fr_cm: float | None
+    l_cm: float | None
+    r_cm: float | None
     front_bucket: str
+    left_bucket: str
+    right_bucket: str
     telemetry: dict
 
 
@@ -31,7 +38,14 @@ def experience_record_to_dict(record: ExperienceRecord) -> dict:
         "situation": {
             "state": record.situation.state,
             "front_cm": record.situation.front_cm,
+            "fl_cm": record.situation.fl_cm,
+            "fc_cm": record.situation.fc_cm,
+            "fr_cm": record.situation.fr_cm,
+            "l_cm": record.situation.l_cm,
+            "r_cm": record.situation.r_cm,
             "front_bucket": record.situation.front_bucket,
+            "left_bucket": record.situation.left_bucket,
+            "right_bucket": record.situation.right_bucket,
             "telemetry": record.situation.telemetry,
         },
         "user_instruction": record.user_instruction,
@@ -46,10 +60,18 @@ def experience_record_to_dict(record: ExperienceRecord) -> dict:
 
 def experience_record_from_dict(data: dict) -> ExperienceRecord:
     situation_data = data.get("situation", {})
+    legacy_front_cm = _optional_float(situation_data.get("front_cm"))
     situation = ExperienceSituation(
         state=str(situation_data.get("state", "FRONT_UNKNOWN")),
-        front_cm=_optional_float(situation_data.get("front_cm")),
+        front_cm=legacy_front_cm,
+        fl_cm=_optional_float(situation_data.get("fl_cm")),
+        fc_cm=_optional_float(situation_data.get("fc_cm")),
+        fr_cm=_optional_float(situation_data.get("fr_cm")),
+        l_cm=_optional_float(situation_data.get("l_cm")),
+        r_cm=_optional_float(situation_data.get("r_cm")),
         front_bucket=str(situation_data.get("front_bucket", "unknown")),
+        left_bucket=str(situation_data.get("left_bucket", "unknown")),
+        right_bucket=str(situation_data.get("right_bucket", "unknown")),
         telemetry=dict(situation_data.get("telemetry", {})),
     )
 

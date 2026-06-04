@@ -1,6 +1,6 @@
 app:
   name: Geo Ground Control Station
-  version: 0.10.0-mvp10
+  version: 0.11.0-final-tof
 
 esp32:
   host: 192.168.4.1
@@ -22,16 +22,33 @@ movement:
     - CCW
     - SAFE_FWD
     - STOP
+  manual_commands:
+    - PING
+    - STATUS
+    - DIST
+    - STREAM_ON
+    - STREAM_OFF
+    - FWD
+    - SAFE_FWD
+    - BACK
+    - LEFT
+    - RIGHT
+    - CW
+    - CCW
+    - STOP
   max_steps: 5
   default_duration_ms: 700
   min_duration_ms: 300
   max_duration_ms: 1500
   feedback_adjustment_ms: 200
   inter_step_delay_ms: 150
+  side_block_threshold_cm: 15.0
+  front_block_threshold_cm: 20.0
 
 experience:
   path: data/experiences.jsonl
   min_similarity_score: 0.6
+  max_results: 3
   auto_execute: false
 
 ollama:
@@ -49,16 +66,13 @@ safety:
     - PING
     - STATUS
     - DIST
-    - LED_ON
-    - LED_OFF
-    - LED_TOGGLE
-    - SAFE_FWD
+    - STREAM_ON
+    - STREAM_OFF
     - FWD
+    - SAFE_FWD
     - BACK
     - LEFT
     - RIGHT
     - CW
     - CCW
     - STOP
-    - STREAM_ON
-    - STREAM_OFF

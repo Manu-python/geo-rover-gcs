@@ -1,79 +1,58 @@
 # Geo Ground Control Station
 
-Geo GCS is the Python/PyQt5 desktop application for Geo, an ESP32-S3 rover. It
-provides operator controls, live telemetry, local Ollama prompting,
-deterministic command validation, UDP routing, logs, and local experience
-memory.
+Geo GCS is the Python/PyQt5 desktop ground control station for Geo, an
+AI-assisted adaptive rover. The final rover uses an ESP32-S3, two DRV8833 motor
+drivers, four TT motors with mecanum wheels, and five VL53L0X Time-of-Flight
+sensors.
 
-MVP 10 is complete. It adds retrieval-based experience memory while preserving
-the MVP 8 telemetry workflow and the MVP 9 movement-sequence workflow.
+The GCS handles telemetry display, local Ollama prompting, natural-language to
+movement-sequence generation, deterministic validation, sequence execution,
+local experience memory, logging, and operator approval before execution.
+
+The ESP32 firmware handles motor execution, local movement safety, ToF sensor
+readings, UDP command receiving, UDP telemetry streaming, and Wi-Fi AP mode.
 
 ## Safety Architecture
 
-The GCS is the deterministic middle layer between the LLM and the rover:
+The LLM does not directly control motors. It only proposes high-level movement
+commands from a fixed allowlist. The GCS validates every proposed command and
+duration before sending anything to the ESP32. The ESP32 still enforces
+real-time local safety with its sensors.
 
 ```text
-operator instruction and rover telemetry
-    -> local Ollama model proposes a constrained sequence
-    -> GCS extracts and validates every step
-    -> operator approves execution
-    -> GCS sends validated UDP commands
-    -> ESP32 applies local safety checks and drives hardware
+operator instruction + latest telemetry
+    -> local Ollama prompt
+    -> strict JSON movement sequence
+    -> GCS extraction and validation
+    -> operator approval
+    -> UDP commands to ESP32
+    -> ESP32 local safety + motor execution
 ```
 
-The LLM never sends raw motor values, wheel values, PWM values, or arbitrary
-hardware commands. The ESP32 remains responsible for local motor control,
-sensors, and forward-movement safety. Remembered actions are never executed
-automatically in MVP 10.
+Remembered sequences are not auto-executed in MVP 10/final-ToF GCS. The user
+must explicitly click `Execute Validated Sequence`.
 
-## Current Scope
+## Current Capabilities
 
-The current GCS supports:
+- Manual UDP command buttons
+- Start/stop live telemetry streaming
+- Five ToF sensor distance display
+- Robot state display
+- LLM movement sequence generation
+- Deterministic movement validation
+- Duration-aware sequence execution
+- STOP/cancel support
+- Local JSONL experience memory
+- Similar-experience retrieval using five-sensor context
+- Notes-based feedback for later sequence generation
 
-- Manual UDP commands for connection checks, LEDs, movement, and telemetry
-- Live front-distance telemetry with `FRONT_CLEAR`, `BLOCKED_FRONT`, and
-  `FRONT_UNKNOWN` states
-- Local Ollama generation of short movement sequences
-- Deterministic validation before any LLM-proposed movement reaches the rover
-- Duration-aware movement commands
-- Local JSONL experience persistence
-- Rule-based retrieval of similar past experiences
-- Explicit operator approval before executing a remembered sequence
-- Notes-based refinement of movement duration for later trials
-
-This MVP does not include autonomous execution, cloud services, embeddings,
-vector databases, model training, or experience-driven changes to LLM weights.
-
-## Firmware Compatibility
-
-The app expects the ESP32 access point and UDP command server to be available
-at:
-
-```text
-SSID: Geo-Rover
-ESP32 command endpoint: 192.168.4.1:4210
-GCS telemetry listener: 0.0.0.0:4210
-```
-
-The firmware must support:
-
-- Bare commands such as `PING`, `STOP`, `STREAM_ON`, and `STREAM_OFF`
-- Timed movement commands such as `LEFT,700` and `SAFE_FWD,1200`
-- Telemetry packets beginning with `TEL`
-- `SAFE_FWD` as the locally safety-checked forward command
-
-There is an important UDP routing detail. The GCS sends `STREAM_ON` from a
-temporary UDP source port, but its telemetry listener is configured separately
-on port `4210`. Firmware must send telemetry to the requesting laptop IP
-address and the configured GCS telemetry port `4210`, not to the temporary
-source port of the `STREAM_ON` packet.
+This project does not use cloud services, embeddings, a vector database, or LLM
+weight training.
 
 ## Setup
 
-Create a virtual environment and install the Python dependencies:
-
 ```bash
-cd path/to/geo-rover-gcs
+cd /path/to/geo-rover-gcs
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -86,78 +65,118 @@ ollama serve
 ollama pull llama3.2
 ```
 
-The configured model can be changed in `config/default.yaml`.
+Connect the laptop to the rover Wi-Fi AP:
 
-Connect the laptop to the `Geo-Rover` Wi-Fi network, then launch the GCS:
+```text
+SSID: Geo-Rover
+ESP32 command endpoint: 192.168.4.1:4210
+```
+
+Run the GCS:
 
 ```bash
 source .venv/bin/activate
 python main.py
 ```
 
-## UI Workflow
+## Final Telemetry Format
 
-### Manual Commands
-
-Use the manual buttons to test firmware behavior without Ollama. These commands
-still pass through the GCS allowlist.
-
-Useful checks:
-
-- `PING`, expected reply: `PONG`
-- `DIST`, expected distance-related reply
-- `LEFT`, `RIGHT`, `BACK`, `CW`, `CCW`, and `SAFE_FWD`, expected movement
-  acknowledgement
-- `STOP`, expected stop acknowledgement
-
-Manual buttons send bare commands. The `STOP` button is the operator stop path.
-
-### Telemetry
-
-Click `Start Telemetry` to start the listener and send `STREAM_ON`. The UI
-shows:
-
-- front distance
-- robot state
-- uptime
-- firmware version
-- last telemetry timestamp
-- telemetry connection status
-
-Click `Stop Telemetry` to send `STREAM_OFF` and stop the listener. Telemetry can
-be started again without restarting the app.
-
-The expected packet format is:
+The final ToF firmware sends UDP telemetry packets like:
 
 ```text
-TEL,front_cm=34.2,state=FRONT_CLEAR,uptime_ms=12345,fw=0.9.0-mvp9
+TEL,fl_cm=45.2,fc_cm=38.1,fr_cm=41.7,l_cm=62.0,r_cm=55.4,state=CLEAR,uptime_ms=12345,fw=0.11.0-final-tof
 ```
 
-The `fw` value reports the installed firmware version and does not need to
-match the GCS MVP number. Additional telemetry fields are preserved in saved
-experience records.
-
-### Legacy LED And Status Prompt
-
-The retained `LLM Prompt` panel supports the earlier constrained command flow
-for LEDs and status checks. It asks Ollama to select one allowed command,
-validates that command, and sends it to the ESP32. Use `LLM Movement Sequence`
-for the MVP 9 and MVP 10 movement workflow.
-
-### LLM Movement Sequences
-
-In `LLM Movement Sequence`, enter an instruction such as:
+If a sensor is unavailable, the firmware sends `-1` for that sensor:
 
 ```text
-Dodge the obstacle by moving left first and then move forward.
+TEL,fl_cm=-1,fc_cm=18.0,fr_cm=-1,l_cm=-1,r_cm=54.0,state=BLOCKED_FRONT,uptime_ms=12345,fw=0.11.0-final-tof
 ```
 
-Click `Generate Movement Sequence`. The app asks Ollama for JSON, extracts the
-JSON object, validates every step, and displays the validated result. It does
-not execute the sequence yet.
+Field meanings:
 
-Click `Execute Validated Sequence` to approve execution. The GCS sends each
-step separately and logs the rover response.
+- `fl_cm`: front-left distance
+- `fc_cm`: front-center distance
+- `fr_cm`: front-right distance
+- `l_cm`: left distance
+- `r_cm`: right distance
+- `state`: firmware state classification
+- `uptime_ms`: ESP32 uptime
+- `fw`: firmware version
+
+Supported states:
+
+- `CLEAR`
+- `BLOCKED_FRONT`
+- `BLOCKED_LEFT`
+- `BLOCKED_RIGHT`
+- `FRONT_UNKNOWN`
+- `SENSOR_ERROR`
+
+The GCS displays `-1.0 cm (unavailable)` for missing sensors and does not crash
+when one or more sensor fields are unavailable.
+
+## Telemetry Workflow
+
+1. Upload the final ToF firmware to the ESP32.
+2. Connect the laptop to `Geo-Rover`.
+3. Start the GCS with `python main.py`.
+4. Press `PING` and verify `PONG`.
+5. Press `Start Telemetry`.
+6. Confirm all five sensor labels update:
+   - Front Left
+   - Front Center
+   - Front Right
+   - Left
+   - Right
+7. Put an obstacle in front and confirm `BLOCKED_FRONT`.
+8. Put an obstacle on the left and confirm the left distance/state changes.
+9. Press `Stop Telemetry`, then `Start Telemetry`, and confirm telemetry resumes.
+
+The GCS listens on:
+
+```yaml
+telemetry:
+  listen_host: 0.0.0.0
+  listen_port: 4210
+```
+
+Firmware should send telemetry to the laptop IP and the configured telemetry
+port `4210`. It should not stream to the temporary UDP source port used by the
+`STREAM_ON` command.
+
+## Manual Commands
+
+Manual buttons are for testing firmware behavior without Ollama:
+
+- `PING`
+- `STATUS`
+- `DIST`
+- `STREAM_ON`
+- `STREAM_OFF`
+- `FWD`
+- `SAFE_FWD`
+- `BACK`
+- `LEFT`
+- `RIGHT`
+- `CW`
+- `CCW`
+- `STOP`
+
+`FWD` is manual/test only. It may appear as `FWD (manual/test)` in the UI.
+LLM-generated sequences are not allowed to use `FWD`.
+
+Direct UDP debugging without the GUI:
+
+```bash
+python tools/send_udp_command.py PING
+python tools/send_udp_command.py SAFE_FWD 1200
+python tools/send_udp_command.py STOP
+```
+
+Timed commands use the same configured movement duration limits as the UI.
+
+## LLM Movement Command Policy
 
 Allowed LLM sequence commands:
 
@@ -169,188 +188,148 @@ Allowed LLM sequence commands:
 - `SAFE_FWD`
 - `STOP`
 
-`FWD` is intentionally rejected from LLM sequences. Forward intent must use
-`SAFE_FWD`, allowing the ESP32 to enforce its local safety rule.
+Rejected from LLM sequences:
 
-The current limits are:
+- `FWD`
+- raw motor values
+- raw PWM values
+- wheel-specific commands
+- unknown command names
 
-- Maximum sequence length: `5` steps
-- Movement duration range: `300-1500 ms`
+Movement limits:
+
+- Maximum steps: `5`
 - Default movement duration: `700 ms`
+- Minimum movement duration: `300 ms`
+- Maximum movement duration: `1500 ms`
 - Inter-step delay: `150 ms`
 - `STOP` duration: `0 ms`
 
-Do not remove these limits during MVP testing. They are part of the
-deterministic safety boundary. Tune them deliberately in `config/default.yaml`
-only after physical testing demonstrates a specific need.
+Telemetry-aware validation:
 
-## MVP 10 Experience Memory
+- `LEFT` is rejected if `state=BLOCKED_LEFT` or `l_cm` is below
+  `side_block_threshold_cm`.
+- `RIGHT` is rejected if `state=BLOCKED_RIGHT` or `r_cm` is below
+  `side_block_threshold_cm`.
+- `SAFE_FWD` remains allowed when front is blocked because the ESP32 is the
+  local safety gate, but the GCS shows a warning if the sequence tries forward
+  before an escape step.
+- If telemetry is unavailable or reports `FRONT_UNKNOWN`/`SENSOR_ERROR`, the
+  GCS allows validation but shows a warning.
 
-### What Is Stored
+## LLM Movement Test
 
-An experience stores:
+1. Start telemetry.
+2. Put an obstacle in front of Geo.
+3. Confirm telemetry shows `BLOCKED_FRONT`.
+4. Enter:
+   ```text
+   Dodge the obstacle by moving left first and then forward.
+   ```
+5. Click `Generate Movement Sequence`.
+6. Confirm the validated sequence uses `LEFT` and `SAFE_FWD`.
+7. Click `Execute Validated Sequence` to approve execution.
+8. Watch the execution log for each UDP command and ESP32 response.
 
-- a pre-action situation snapshot
-- the complete telemetry dictionary
-- the user instruction
-- the validated movement steps and durations
-- an outcome: `success`, `partial`, or `failure`
-- optional operator notes
-- an ID and timestamp
+If the left side is blocked, the validator should reject `LEFT`. If the right
+side is blocked, it should reject `RIGHT`.
 
-Records are appended locally as JSON Lines:
+## Experience Memory
+
+Experience memory is stored locally in:
 
 ```text
 data/experiences.jsonl
 ```
 
-Example record:
+This is retrieval-based memory, not model training. The robot does not modify
+LLM weights. The GCS stores successful or partially successful situation/action
+pairs and retrieves similar records later.
 
-```json
-{"id":"example-id","timestamp":"2026-05-31T12:00:00-04:00","situation":{"state":"BLOCKED_FRONT","front_cm":8.5,"front_bucket":"very_close","telemetry":{"front_cm":8.5,"state":"BLOCKED_FRONT","fw":"0.9.0-mvp9"}},"user_instruction":"Move left and then forward to avoid the obstacle","sequence":[{"command":"LEFT","duration_ms":700},{"command":"SAFE_FWD","duration_ms":900}],"outcome":"success","notes":"LEFT was enough and SAFE_FWD was enough"}
-```
+An experience stores:
 
-The memory file is intentionally excluded from Git because it is local runtime
-data. Back it up separately when trial history matters.
-
-### Pre-Action Snapshots
-
-Saved experiences use the situation before movement, not the telemetry after
-the rover has completed the maneuver.
-
-The GCS captures a snapshot when a movement sequence is generated and refreshes
-it immediately before execution. Clicking `Save Experience` afterward stores
-that snapshot. This preserves the obstacle distance and state that made the
-action relevant.
-
-Saving is rejected unless the GCS has:
-
-- received telemetry
-- captured a movement sequence
-- captured a pre-action situation
-- received a user instruction
-
-### Similarity Matching
-
-MVP 10 uses transparent rule-based scoring:
-
-- `+0.6` if the robot state matches
-- `+0.3` if the front-distance bucket matches
-- `+0.1` if the stored outcome is `success`
+- pre-action robot state
+- five sensor values
+- front, left, and right distance buckets
+- complete telemetry dictionary
+- user instruction
+- validated movement sequence
+- outcome: `success`, `partial`, or `failure`
+- notes
+- timestamp
 
 Distance buckets:
 
-- `unknown`: missing distance or `-1`
+- `unknown`: missing value or `-1`
 - `very_close`: `0 <= cm < 15`
 - `near`: `15 <= cm < 30`
 - `medium`: `30 <= cm < 60`
 - `far`: `cm >= 60`
 
-Only records scoring at least `0.6` are eligible. The UI displays all eligible
-similar experiences, ordered by score. `Find & Load Best Experience` considers
-successful records only.
+For `front_bucket`, the GCS uses the minimum valid front distance from
+`fl_cm`, `fc_cm`, and `fr_cm`. `left_bucket` uses `l_cm`. `right_bucket` uses
+`r_cm`.
 
-### Saving An Experience
+Similarity scoring:
 
-After executing a movement sequence:
+- `+0.45` if state matches
+- `+0.20` if front bucket matches
+- `+0.15` if left bucket matches
+- `+0.15` if right bucket matches
+- `+0.05` if outcome is `success`
 
-1. Set the outcome to `success`, `partial`, or `failure`.
-2. Add notes if useful.
-3. Confirm that `Saved Situation` shows the intended pre-action state and
-   distance.
-4. Click `Save Experience`.
+Only matches at or above `experience.min_similarity_score` are shown. The
+default result cap is `experience.max_results: 3`.
 
-### Reusing An Experience
+Example JSONL record:
 
-To reuse a stored action:
+```json
+{"id":"example-id","timestamp":"2026-06-03T12:00:00-04:00","situation":{"state":"BLOCKED_FRONT","front_cm":8.5,"fl_cm":12.0,"fc_cm":8.5,"fr_cm":16.0,"l_cm":64.0,"r_cm":22.0,"front_bucket":"very_close","left_bucket":"far","right_bucket":"near","telemetry":{"fl_cm":12.0,"fc_cm":8.5,"fr_cm":16.0,"l_cm":64.0,"r_cm":22.0,"state":"BLOCKED_FRONT","fw":"0.11.0-final-tof"}},"user_instruction":"Dodge the obstacle by moving left first and then forward.","sequence":[{"command":"LEFT","duration_ms":700},{"command":"SAFE_FWD","duration_ms":900}],"outcome":"success","notes":"LEFT was enough and SAFE_FWD was enough"}
+```
 
-1. Recreate a similar rover situation.
-2. Confirm telemetry is updating.
-3. Click `Find Similar Experience`.
-4. Select a matching record.
-5. Click `Load Selected Experience Sequence`.
-6. Review the loaded sequence.
-7. Click `Execute Validated Sequence` to approve movement.
+## Experience Memory Test
 
-`Find & Load Best Experience` combines steps 3-5 for the highest-scoring
-successful record. It still does not execute the sequence.
+1. Start telemetry.
+2. Put an obstacle in front of Geo and confirm `BLOCKED_FRONT`.
+3. Enter:
+   ```text
+   Dodge the obstacle by moving left first and then forward.
+   ```
+4. Click `Generate Movement Sequence`.
+5. Click `Execute Validated Sequence`.
+6. Confirm `Saved Situation` shows the pre-action sensor values and buckets.
+7. Set outcome to `success`.
+8. Add notes if useful.
+9. Click `Save Experience`.
+10. Recreate a similar five-sensor situation.
+11. Click `Find Similar Experience`.
+12. Select the remembered record.
+13. Click `Load Selected Experience Sequence`.
+14. Review the loaded sequence.
+15. Click `Execute Validated Sequence` to approve movement.
 
-`experience.auto_execute` is reserved for future work and must remain `false`
-for MVP 10.
+`Find & Load Best Experience` loads the best successful match but still does
+not execute it.
 
 ## Notes-Based Refinement
 
-Experience memory and feedback refinement are related but distinct:
-
-- Loading an experience loads its saved sequence exactly as the next validated
-  sequence.
-- Loading an experience also restores its notes and queues them as feedback.
-- Executing immediately runs the stored sequence unchanged.
-- To produce an adjusted proposal, click `Generate Movement Sequence` after
-  loading the experience or after clicking `Use Notes As Feedback`.
-
-The next Ollama prompt receives the prior sequence, outcome, and notes. After
-the LLM response is validated, the GCS also applies a deterministic duration
-adjustment for simple operator feedback. The default adjustment is `200 ms`,
-clamped to the configured duration limits.
-
-Write notes that mention the relevant command or direction clearly:
+Notes can guide the next LLM generation and deterministic duration adjustment.
+For example:
 
 ```text
 LEFT was enough but SAFE_FWD was not enough.
 ```
 
-This keeps the previous `LEFT` duration similar and increases the `SAFE_FWD`
-duration for the next generated proposal.
+Then click `Use Notes As Feedback` and generate again. The next prompt includes
+the previous sequence and notes. After validation, the GCS also applies a
+simple deterministic duration adjustment, clamped to the configured movement
+limits.
 
-Supported feedback wording includes:
-
-- Increase: `not enough`, `too short`, `increase`, `longer`, `more`,
-  `further`, `farther`
-- Decrease: `too much`, `too far`, `too long`, `decrease`, `shorter`, `less`,
-  `overshot`
-- Keep similar: `enough`, `good`, `correct`, `fine`, `worked`
-
-Use `Clear Feedback` when the next generation should not use the previous
-trial.
-
-## Direct UDP Debugging
-
-Use the CLI tool to test firmware communication without PyQt5 or Ollama:
-
-```bash
-python tools/send_udp_command.py PING
-python tools/send_udp_command.py LEFT
-python tools/send_udp_command.py SAFE_FWD 1200
-python tools/send_udp_command.py STOP
-```
-
-Timed CLI commands use the same configured allowlist and duration limits as the
-application.
-
-## Acceptance Test
-
-Use this flow after firmware or GCS changes:
-
-1. Connect the laptop to `Geo-Rover`.
-2. Launch the app and confirm manual `PING` returns `PONG`.
-3. Click `Start Telemetry` and confirm fields update.
-4. Click `Stop Telemetry`, then `Start Telemetry`, and confirm fields resume
-   updating.
-5. Place an obstacle in front of Geo and confirm `BLOCKED_FRONT`.
-6. Generate and execute a `LEFT -> SAFE_FWD` sequence.
-7. Confirm `Saved Situation` still shows the pre-action obstacle state.
-8. Save the trial as `success`.
-9. Restart the app.
-10. Recreate the obstacle scenario and find similar experiences.
-11. Load the saved record and confirm Geo does not move until clicking
-    `Execute Validated Sequence`.
-12. Run a `partial` trial with `SAFE_FWD was not enough`, regenerate, and
-    confirm the proposed forward duration increases within configured limits.
+Use `Clear Feedback` when the next generation should ignore the last trial.
 
 ## Configuration
 
-Runtime settings live in `config/default.yaml`:
+Main settings live in `config/default.yaml`:
 
 ```yaml
 esp32:
@@ -365,84 +344,80 @@ telemetry:
   stale_timeout_s: 2.0
 
 movement:
+  allowed_sequence_commands:
+    - LEFT
+    - RIGHT
+    - BACK
+    - CW
+    - CCW
+    - SAFE_FWD
+    - STOP
   max_steps: 5
   default_duration_ms: 700
   min_duration_ms: 300
   max_duration_ms: 1500
-  feedback_adjustment_ms: 200
   inter_step_delay_ms: 150
+  side_block_threshold_cm: 15.0
+  front_block_threshold_cm: 20.0
 
 experience:
   path: data/experiences.jsonl
   min_similarity_score: 0.6
+  max_results: 3
   auto_execute: false
-
-ollama:
-  base_url: http://localhost:11434
-  model: llama3.2
-  timeout_s: 20
 ```
 
-## Runtime Data Maintenance
-
-Logs are written to timestamped files under `logs/`. Logs and local experience
-records are excluded from Git.
-
-To archive experience memory before a new test campaign:
-
-```bash
-mv data/experiences.jsonl data/experiences.backup.jsonl
-```
-
-The app creates a new `data/experiences.jsonl` automatically the next time an
-experience is saved.
+For this MVP, keep `experience.auto_execute` set to `false`.
 
 ## Troubleshooting
 
 ### `PING` Does Not Return `PONG`
 
 - Confirm the laptop is connected to `Geo-Rover`.
-- Confirm the ESP32 is reachable at `192.168.4.1:4210`.
-- Confirm the firmware UDP server is running.
+- Confirm the ESP32 command endpoint is `192.168.4.1:4210`.
+- Confirm the firmware UDP command server is running.
 
-### `STREAM_ON` Returns `OK:STREAM_ON`, But No Telemetry Appears
+### `STREAM_ON` Replies OK But Telemetry Is Stale
 
-- Confirm the GCS telemetry status does not show a bind error.
-- Confirm firmware sends telemetry to the laptop IP and fixed GCS telemetry
-  port `4210`.
-- Do not send telemetry to the temporary UDP source port used by the
-  `STREAM_ON` command.
+- Confirm the telemetry listener is not showing a bind error.
+- Confirm firmware sends telemetry to the laptop IP and port `4210`.
 - Check ESP32 Serial logs for the telemetry destination.
+- Confirm firewall settings are not blocking UDP on the laptop.
 
-### Telemetry Becomes Stale
+### One Sensor Shows `-1`
 
-The UI reports stale telemetry when no `TEL` packet arrives within
-`telemetry.stale_timeout_s`. Confirm the rover is still connected and
-streaming.
+`-1` means the firmware reported that sensor as unavailable. The GCS displays
+it and treats its bucket as `unknown`.
 
-### Ollama Is Unavailable
+### Ollama Is Unreachable
 
-Start Ollama and confirm the configured model exists:
+Run:
 
 ```bash
 ollama serve
 ollama pull llama3.2
 ```
 
-### A Remembered Sequence Ignores Its Notes
+Also confirm `ollama.base_url` and `ollama.model` in `config/default.yaml`.
 
-Loading a record restores the exact saved sequence. Click
-`Generate Movement Sequence` afterward to generate an adjusted proposal using
-the restored notes.
+### A Remembered Sequence Does Not Use Notes Immediately
 
-### Older Experiences Match Poorly
+Loading an experience loads the saved sequence exactly. To use its notes as
+feedback for a new proposal, click `Generate Movement Sequence` after loading
+the experience.
 
-Records created before pre-action snapshot support may contain post-action
-telemetry. Archive the old file and begin a clean trial set:
+## Runtime Data
+
+Logs are written under `logs/`. Experience records are written under `data/`.
+Both are local runtime data and should not be committed.
+
+To archive a test campaign:
 
 ```bash
-mv data/experiences.jsonl data/experiences.pre-snapshot-fix.jsonl
+mv data/experiences.jsonl data/experiences.tof-test-backup.jsonl
 ```
+
+The app creates a new memory file on the next save.
 
 ## Project Layout
 
@@ -451,18 +426,16 @@ main.py                              PyQt5 entry point
 config/default.yaml                  runtime configuration
 app/ui/main_window.py                operator UI and workflow coordination
 app/comms/esp32_udp_client.py        UDP command/reply client
-app/comms/telemetry_receiver.py      non-blocking telemetry listener worker
+app/comms/telemetry_receiver.py      UDP telemetry listener worker
 app/comms/sequence_executor.py       validated sequence execution worker
 app/core/telemetry_parser.py         TEL packet parser
+app/core/telemetry_state.py          five-sensor telemetry state model
 app/core/sequence_validator.py       deterministic LLM sequence validator
-app/core/sequence_feedback.py        deterministic notes-based refinement
-app/core/experience.py               experience data model and serialization
+app/core/sequence_feedback.py        notes-based duration refinement
+app/core/experience.py               experience data model
 app/core/experience_store.py         JSONL persistence and similarity search
-app/core/situation_builder.py        telemetry snapshot and distance buckets
-app/llm/movement_prompt_builder.py   constrained Ollama movement prompt
+app/core/situation_builder.py        telemetry-to-situation conversion
+app/llm/movement_prompt_builder.py   constrained movement prompt
 app/llm/sequence_extractor.py        defensive JSON extraction
 tools/send_udp_command.py            direct UDP debugging CLI
 ```
-
-If Ollama or the ESP32 is unavailable, the app reports readable errors in the
-log panel instead of crashing.

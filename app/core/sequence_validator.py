@@ -46,6 +46,9 @@ def validate_movement_sequence(
     default_duration_ms = int(movement_config.get("default_duration_ms", 700))
     min_duration_ms = int(movement_config.get("min_duration_ms", 300))
     max_duration_ms = int(movement_config.get("max_duration_ms", 1500))
+    side_block_threshold_cm = float(
+        movement_config.get("side_block_threshold_cm", 15.0)
+    )
 
     if not sequence_data:
         raise ValueError("Movement sequence cannot be empty")
@@ -54,10 +57,6 @@ def validate_movement_sequence(
         raise ValueError(
             f"Movement sequence has {len(sequence_data)} steps; max is {max_steps}"
         )
-
-    telemetry_state = None
-    if latest_telemetry:
-        telemetry_state = str(latest_telemetry.get("state", "")).strip().upper()
 
     steps: list[MovementStep] = []
     for index, raw_step in enumerate(sequence_data, start=1):
@@ -87,6 +86,12 @@ def validate_movement_sequence(
                 f"Allowed commands: {allowed_text}"
             )
 
+        _reject_blocked_side_command(
+            command=command,
+            latest_telemetry=latest_telemetry,
+            side_block_threshold_cm=side_block_threshold_cm,
+        )
+
         duration_ms = _parse_duration_ms(
             raw_step=raw_step,
             index=index,
@@ -103,13 +108,54 @@ def validate_movement_sequence(
                 f"{min_duration_ms}-{max_duration_ms} ms"
             )
 
-        if telemetry_state == "BLOCKED_FRONT" and command == "SAFE_FWD":
-            # SAFE_FWD stays allowed. The ESP32 firmware is still the local safety gate.
-            pass
-
         steps.append(MovementStep(command=command, duration_ms=duration_ms))
 
     return MovementSequence(steps=steps)
+
+
+def movement_sequence_warnings(
+    sequence: MovementSequence,
+    latest_telemetry: dict | None,
+    config: dict,
+) -> list[str]:
+    warnings: list[str] = []
+    if latest_telemetry is None:
+        return ["Telemetry unavailable; movement was validated without sensor context"]
+
+    state = _telemetry_state(latest_telemetry)
+    if state in {"FRONT_UNKNOWN", "SENSOR_ERROR"}:
+        warnings.append(
+            f"Telemetry state is {state}; movement was validated with limited confidence"
+        )
+
+    movement_config = config.get("movement", {})
+    front_block_threshold_cm = float(
+        movement_config.get("front_block_threshold_cm", 20.0)
+    )
+    front_blocked = state == "BLOCKED_FRONT" or _front_is_blocked(
+        latest_telemetry,
+        front_block_threshold_cm,
+    )
+
+    if front_blocked and any(
+        step.command == "SAFE_FWD" for step in sequence.steps
+    ):
+        first_safe_fwd_index = next(
+            index
+            for index, step in enumerate(sequence.steps)
+            if step.command == "SAFE_FWD"
+        )
+        prior_escape = any(
+            step.command in {"LEFT", "RIGHT", "BACK", "CW", "CCW"}
+            for step in sequence.steps[:first_safe_fwd_index]
+        )
+        if not prior_escape:
+            warnings.append(
+                "Front is blocked; SAFE_FWD may be blocked by firmware unless "
+                "the rover first moves laterally, backward, or rotates"
+            )
+
+    return warnings
 
 
 def _reject_raw_motor_fields(raw_step: dict, index: int) -> None:
@@ -117,6 +163,52 @@ def _reject_raw_motor_fields(raw_step: dict, index: int) -> None:
         key_text = str(key).strip().lower()
         if key_text in RAW_CONTROL_KEYS or "pwm" in key_text or "motor" in key_text:
             raise ValueError(f"Step {index} contains raw motor field '{key}'")
+
+
+def _reject_blocked_side_command(
+    command: str,
+    latest_telemetry: dict | None,
+    side_block_threshold_cm: float,
+) -> None:
+    if latest_telemetry is None:
+        return
+
+    state = _telemetry_state(latest_telemetry)
+    if command == "LEFT" and (
+        state == "BLOCKED_LEFT"
+        or _is_blocked_distance(latest_telemetry.get("l_cm"), side_block_threshold_cm)
+    ):
+        raise ValueError("LEFT rejected because left side telemetry is blocked")
+
+    if command == "RIGHT" and (
+        state == "BLOCKED_RIGHT"
+        or _is_blocked_distance(latest_telemetry.get("r_cm"), side_block_threshold_cm)
+    ):
+        raise ValueError("RIGHT rejected because right side telemetry is blocked")
+
+
+def _telemetry_state(latest_telemetry: dict) -> str:
+    state = str(latest_telemetry.get("state", "")).strip().upper()
+    if state == "FRONT_CLEAR":
+        return "CLEAR"
+    return state
+
+
+def _is_blocked_distance(value: object, threshold_cm: float) -> bool:
+    try:
+        distance_cm = float(value)
+    except (TypeError, ValueError):
+        return False
+    if distance_cm < 0:
+        return False
+    return distance_cm < threshold_cm
+
+
+def _front_is_blocked(latest_telemetry: dict, threshold_cm: float) -> bool:
+    for key in ("fl_cm", "fc_cm", "fr_cm", "front_cm"):
+        if _is_blocked_distance(latest_telemetry.get(key), threshold_cm):
+            return True
+    return False
 
 
 def _parse_duration_ms(

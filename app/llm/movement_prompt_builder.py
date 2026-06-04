@@ -12,12 +12,14 @@ def build_mvp9_movement_prompt(
 ) -> str:
     telemetry_lines = ["Latest telemetry: unavailable"]
     if latest_telemetry:
-        front_cm = latest_telemetry.get("front_cm", "unknown")
-        state = latest_telemetry.get("state", "unknown")
         telemetry_lines = [
             "Latest telemetry:",
-            f"- front_cm: {front_cm}",
-            f"- state: {state}",
+            f"- state: {latest_telemetry.get('state', 'unknown')}",
+            f"- fl_cm: {latest_telemetry.get('fl_cm', 'unknown')}",
+            f"- fc_cm: {latest_telemetry.get('fc_cm', latest_telemetry.get('front_cm', 'unknown'))}",
+            f"- fr_cm: {latest_telemetry.get('fr_cm', 'unknown')}",
+            f"- l_cm: {latest_telemetry.get('l_cm', 'unknown')}",
+            f"- r_cm: {latest_telemetry.get('r_cm', 'unknown')}",
         ]
 
     telemetry_block = "\n".join(telemetry_lines)
@@ -27,7 +29,8 @@ def build_mvp9_movement_prompt(
         trial_outcome=trial_outcome,
     )
 
-    return f"""You control Geo only by selecting a short sequence of commands from:
+    return f"""Geo is a mecanum rover.
+You control Geo only by selecting a short sequence of commands from:
 LEFT, RIGHT, BACK, CW, CCW, SAFE_FWD, STOP.
 
 Return only valid JSON.
@@ -39,17 +42,35 @@ Use at most 5 steps.
 Use duration_ms between 300 and 1500 for movement commands.
 Use duration_ms 0 for STOP.
 
+Sensor context rules:
+- fl_cm, fc_cm, fr_cm are front-left, front-center, and front-right distance sensors.
+- l_cm and r_cm are side distance sensors.
+- A value of -1 means that sensor is unavailable.
+- If state is BLOCKED_FRONT, use LEFT, RIGHT, BACK, CW, or CCW before SAFE_FWD.
+- If the left sensor is blocked or l_cm is low, avoid LEFT.
+- If the right sensor is blocked or r_cm is low, avoid RIGHT.
+- If both sides are blocked, prefer BACK, CW, or CCW.
+- If state is CLEAR and front sensors are clear, SAFE_FWD is okay.
+
 {telemetry_block}
 
 {feedback_block}
 
 Example:
 User: Dodge the obstacle by moving left first and then go forward
+Telemetry: state=BLOCKED_FRONT, l_cm=60, r_cm=20
 JSON:
 {{"sequence":[{{"command":"LEFT","duration_ms":700}},{{"command":"SAFE_FWD","duration_ms":900}}]}}
 
 Example:
+User: Avoid the obstacle.
+Telemetry: state=BLOCKED_FRONT, l_cm=12, r_cm=65
+JSON:
+{{"sequence":[{{"command":"RIGHT","duration_ms":700}},{{"command":"SAFE_FWD","duration_ms":900}}]}}
+
+Example:
 User: Back up and turn right
+Telemetry: state=CLEAR, l_cm=62, r_cm=55
 JSON:
 {{"sequence":[{{"command":"BACK","duration_ms":700}},{{"command":"CW","duration_ms":500}}]}}
 

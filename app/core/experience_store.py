@@ -48,7 +48,7 @@ class ExperienceStore:
         matches: list[tuple[ExperienceRecord, float]] = []
         for record in self.load_all():
             score = _score_similarity(current_situation, record)
-            if score >= 0.6:
+            if score > 0:
                 matches.append((record, score))
 
         matches.sort(key=lambda item: item[1], reverse=True)
@@ -63,9 +63,13 @@ def _score_similarity(
 ) -> float:
     score = 0.0
     if record.situation.state == current_situation.state:
-        score += 0.6
+        score += 0.45
     if record.situation.front_bucket == current_situation.front_bucket:
-        score += 0.3
+        score += 0.20
+    if record.situation.left_bucket == current_situation.left_bucket:
+        score += 0.15
+    if record.situation.right_bucket == current_situation.right_bucket:
+        score += 0.15
     if record.outcome == "success":
-        score += 0.1
+        score += 0.05
     return min(round(score, 6), 1.0)

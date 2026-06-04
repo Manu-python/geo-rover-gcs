@@ -13,19 +13,16 @@ MVP9_MANUAL_COMMANDS = (
     "PING",
     "STATUS",
     "DIST",
-    "LED_ON",
-    "LED_OFF",
-    "LED_TOGGLE",
-    "SAFE_FWD",
+    "STREAM_ON",
+    "STREAM_OFF",
     "FWD",
+    "SAFE_FWD",
     "BACK",
     "LEFT",
     "RIGHT",
     "CW",
     "CCW",
     "STOP",
-    "STREAM_ON",
-    "STREAM_OFF",
 )
 
 

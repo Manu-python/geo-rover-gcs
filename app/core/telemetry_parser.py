@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 
-TELEMETRY_STATES = ("FRONT_CLEAR", "BLOCKED_FRONT", "FRONT_UNKNOWN")
+DISTANCE_FIELDS = ("fl_cm", "fc_cm", "fr_cm", "l_cm", "r_cm", "front_cm")
+INTEGER_FIELDS = ("uptime_ms",)
+TELEMETRY_STATES = (
+    "CLEAR",
+    "BLOCKED_FRONT",
+    "BLOCKED_LEFT",
+    "BLOCKED_RIGHT",
+    "FRONT_UNKNOWN",
+    "SENSOR_ERROR",
+    # Legacy MVP 8 state kept readable for older firmware/logs.
+    "FRONT_CLEAR",
+)
 
 
 def parse_telemetry_packet(text: str) -> dict:
@@ -13,7 +24,7 @@ def parse_telemetry_packet(text: str) -> dict:
     parts = [part.strip() for part in packet.split(",")]
     prefix = parts[0]
     if prefix != "TEL":
-        raise ValueError(f"Telemetry packet must start with TEL, got {prefix!r}")
+        return {}
 
     telemetry: dict = {}
     for part in parts[1:]:
@@ -28,16 +39,16 @@ def parse_telemetry_packet(text: str) -> dict:
         if not key:
             raise ValueError(f"Invalid telemetry field {part!r}")
 
-        if key == "front_cm":
+        if key in DISTANCE_FIELDS:
             try:
                 telemetry[key] = float(value)
             except ValueError as exc:
-                raise ValueError(f"Invalid front_cm value {value!r}") from exc
-        elif key == "uptime_ms":
+                raise ValueError(f"Invalid {key} value {value!r}") from exc
+        elif key in INTEGER_FIELDS:
             try:
                 telemetry[key] = int(value)
             except ValueError as exc:
-                raise ValueError(f"Invalid uptime_ms value {value!r}") from exc
+                raise ValueError(f"Invalid {key} value {value!r}") from exc
         else:
             telemetry[key] = value
 
